@@ -256,6 +256,12 @@ if 'vectorstore' not in st.session_state:
 if 'chain' not in st.session_state:
     st.session_state.chain = create_llm_chain()
 
+ADVISOR_ENABLED = os.environ.get("ADVISOR_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
+ADVISOR_GATE = float(os.environ.get("ADVISOR_GATE", "1.0"))
+if ADVISOR_ENABLED and 'advisor_room' not in st.session_state:
+    import advisor_room
+    st.session_state.advisor_room = advisor_room
+
 
 if 'history' not in st.session_state:
     st.session_state.history = []
@@ -459,6 +465,16 @@ if question:
         seen_sources, context, debug_candidates = build_context(
             question, st.session_state.vectorstore, st.session_state.parents
         )
+
+        # --- advisor "room": fire only on edge-resource questions ----------
+        if ADVISOR_ENABLED:
+            _room = st.session_state.advisor_room
+            if _room.should_fire(question, ADVISOR_GATE):
+                try:
+                    context += "\n\n=== EDGE RESOURCE ADVISORY ===\n\n" + _room.advise(question)
+                except Exception as _adv_err:
+                    print("advisor room error:", _adv_err)
+        # -------------------------------------------------------------------
 
         history_messages = []
         for entry in st.session_state.history[-3:]:

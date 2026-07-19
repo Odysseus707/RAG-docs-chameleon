@@ -12,8 +12,8 @@ from loader import loader_docs
 
 load_dotenv()
 
-TEJAS_API_BASE = "https://ai.tejas.tacc.utexas.edu/v1"
-TEJAS_API_KEY = os.environ.get("TEJAS_API_KEY")
+TEJAS_API_BASE = os.environ.get("LLM_API_BASE", "https://ai.tejas.tacc.utexas.edu/v1")
+TEJAS_API_KEY = os.environ.get("LLM_API_KEY") or os.environ.get("TEJAS_API_KEY")
 VECT_STORE_PATH = "vect_store"
 
 
@@ -210,7 +210,7 @@ def build_context(
 
 def create_llm_chain():
     llm = ChatOpenAI(
-        model="Meta-Llama-3.3-70B-Instruct",
+        model=os.environ.get("LLM_MODEL", "Meta-Llama-3.3-70B-Instruct"),
         temperature=0,
         openai_api_key=TEJAS_API_KEY,
         openai_api_base=TEJAS_API_BASE,
