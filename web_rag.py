@@ -467,13 +467,68 @@ if question:
         )
 
         # --- advisor "room": fire only on edge-resource questions ----------
+        # The advisory goes into the model context AND is rendered above the
+        # answer, so it is visible that the advisor ran rather than silent.
+        # Raw advisor output, rendered collapsed *after* the answer so the reply
+        # reads as one voice while the working stays inspectable.
+        _panels = []
         if ADVISOR_ENABLED:
             _room = st.session_state.advisor_room
-            if _room.should_fire(question, ADVISOR_GATE):
+            _decision, _why = _room.explain(question, ADVISOR_GATE)
+
+            # If the previous turn offered a recommendation and this turn accepts,
+            # fire on the question that prompted the offer: "yes please" carries no
+            # edge cue of its own and would otherwise be judged unrelated.
+            _pending = st.session_state.pop("advisor_offer_for", None)
+            _first = (question.strip().lower().split() or [""])[0].strip(".,!")
+            if _pending and _first in {"yes", "yeah", "yep", "yup", "sure", "ok",
+                                       "okay", "please", "y"}:
+                question, _decision, _why = (_pending, "fire",
+                                             "you accepted the offer")
+
+            if _decision == "offer":
+                # Ask rather than guess: the model raises it, the user decides.
+                context += ("\n\n=== ADVISOR OFFER ===\n\nThis question may be about "
+                            "reserving hardware on CHI@Edge. End your reply by asking "
+                            "whether the user would like a device reservation "
+                            "recommendation.\n")
+                st.session_state.advisor_offer_for = question
+                st.caption(f"Edge Resource Advisor held back — {_why}. "
+                           "Say yes if you want a reservation recommendation.")
+
+            if _decision == "fire":
                 try:
-                    context += "\n\n=== EDGE RESOURCE ADVISORY ===\n\n" + _room.advise(question)
+                    # Two separate capabilities: what to reserve (artifacts), and
+                    # what is free right now (Blazar). A question can want both.
+                    # Both go into the model's context so the answer reads as one
+                    # voice; the raw output is kept for the collapsed panel below
+                    # the answer rather than shown as a competing blob above it.
+                    if _room.wants_availability(question):
+                        _avail = _room.list_availability()
+                        context += "\n\n=== LIVE DEVICE AVAILABILITY ===\n\n" + _avail
+                        _panels.append(("Live device availability, read from Blazar",
+                                        _avail))
+                    _advisory = _room.advise(question)
+                    context += (
+                        "\n\n=== EDGE RESOURCE ADVISORY ===\n\n" + _advisory +
+                        "\n\nUse the advisory above as your own recommendation. Write it "
+                        "in prose as part of your answer - name the device type, the "
+                        "specific device id and its availability window exactly as the "
+                        "'- device:' line states them, the count and the duration, say "
+                        "why, and include the reservation "
+                        "code block. Finish with the further-reading links exactly as given, so "
+                        "the user can read the artifact it came from. Do not "
+                        "present it as a separate section."
+                    )
+                    _panels.append((f"Edge Resource Advisor — {_why}", _advisory))
                 except Exception as _adv_err:
+                    st.warning(f"Edge advisor error: {_adv_err}")
                     print("advisor room error:", _adv_err)
+            elif _decision == "skip":
+                st.caption(
+                    f"Edge Resource Advisor did not fire — {_why}. "
+                    "Answering from documentation only."
+                )
         # -------------------------------------------------------------------
 
         history_messages = []
@@ -485,6 +540,14 @@ if question:
             {"question": question, "context": context, "history": history_messages}
         ).content
         st.markdown(response_text)
+
+        if _panels:
+            _label = ("Advisor working — %d step%s"
+                      % (len(_panels), "s" if len(_panels) > 1 else ""))
+            with st.expander(_label, expanded=False):
+                for _title, _body in _panels:
+                    st.caption(_title)
+                    st.code(_body, language="text")
 
         if seen_sources:
             render_sources(seen_sources)
