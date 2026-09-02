@@ -66,6 +66,35 @@ def _device_line(rec, availability) -> str:
     return "- device: %s (%s, checked live against Blazar)" % (dev.device_uid, window)
 
 
+def _capability_line(rec) -> str:
+    """What the recommended hardware actually is.
+
+    `gpu: True` above says an accelerator exists, not which one or how capable.
+    A reader cannot tell a jetson-nano from an AGX Orin from that line alone,
+    and neither can a model reading this block. The specs come from the device
+    catalogue, so this line is empty when the type is unknown to it rather than
+    guessed from the machine_type string.
+    """
+    try:
+        from advisor.inventory.catalog import InventoryCache
+        dt = {d.machine_type: d for d in InventoryCache().load()}.get(rec.machine_type)
+    except Exception:  # noqa: BLE001 - the block must still render without it
+        dt = None
+    if dt is None:
+        return "- capability: not in the device catalogue"
+    bits = ["accelerator=%s" % (dt.accelerator or "unknown")]
+    if dt.accelerator == "cuda":
+        bits.append("cuda_compute=%s cuda_cores=%s tensor_cores=%s"
+                    % (dt.cuda_compute, dt.cuda_cores, dt.tensor_cores))
+    elif dt.accelerator == "edgetpu":
+        bits.append("edge_tpu_tops=%s (int8 TFLite only)" % dt.edge_tpu_tops)
+    if dt.ram_gb is not None:
+        bits.append("ram_gb=%s" % dt.ram_gb)
+    if dt.precisions:
+        bits.append("precisions=%s" % (dt.precisions,))
+    return "- capability: " + "  ".join(bits)
+
+
 def _render(rec, availability=()) -> str:
     return "\n".join([
         "A CHI@Edge resource recommendation for this workload "
@@ -73,6 +102,7 @@ def _render(rec, availability=()) -> str:
         "- machine_type: %s%s" % (rec.machine_type, (" [%s]" % rec.device_name) if rec.device_name else ""),
         _device_line(rec, availability),
         "- architecture: %s   gpu: %s" % (rec.architecture, rec.gpu),
+        _capability_line(rec),
         "- image: %s" % rec.image,
         "- device_profiles: %s" % (rec.device_profiles or []),
         "- lease: count=%s duration_hours=%s platform_version=%s runtime=%s exposed_ports=%s" % (
